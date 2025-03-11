@@ -1,33 +1,47 @@
-from flask import Flask, request, jsonify
+import os
 import requests
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-MERCADO_LIVRE_API = "https://api.mercadolibre.com/sites/MLB/search?q="
+SERP_API_KEY = os.getenv("SERP_API_KEY")  # Pegando a API Key do ambiente
+SERP_API_URL = "https://serpapi.com/search"
 
 @app.route("/", methods=["POST"])
 def webhook():
     data = request.get_json()
-
-    # Extrai o nome do produto da intent do Dialogflow
+    
+    # Obtém o nome do produto enviado pelo usuário
     produto = data["queryResult"]["parameters"].get("produto")
 
     if not produto:
         return jsonify({"fulfillmentText": "Por favor, informe um produto para buscar os preços."})
 
-    # Faz a requisição para a API do Mercado Livre
-    response = requests.get(MERCADO_LIVRE_API + produto)
-    
-    if response.status_code != 200:
-        return jsonify({"fulfillmentText": "Não consegui buscar os preços agora. Tente novamente mais tarde."})
+    # Parâmetros da busca na SerpAPI
+    params = {
+        "engine": "google_shopping",
+        "q": produto,
+        "api_key": SERP_API_KEY
+    }
 
-    # Pega os 3 primeiros resultados da busca
-    resultados = response.json()["results"][:3]
+    # Faz a requisição à API
+    response = requests.get(SERP_API_URL, params=params)
+
+    if response.status_code != 200:
+        return jsonify({"fulfillmentText": "Houve um erro ao buscar os preços. Tente novamente mais tarde."})
+
+    results = response.json().get("shopping_results", [])[:3]  # Pega os 3 primeiros resultados
+
+    if not results:
+        return jsonify({"fulfillmentText": "Não encontrei resultados para esse produto."})
 
     # Monta a resposta formatada
     resposta = f"Aqui estão os preços para '{produto}':\n\n"
-    for item in resultados:
-        resposta += f"💰 *{item['title']}* - R$ {item['price']}\n🔗 [Ver produto]({item['permalink']})\n\n"
+    for item in results:
+        nome = item.get("title", "Produto sem nome")
+        preco = item.get("price", "Preço não disponível")
+        link = item.get("link", "#")
+        resposta += f"💰 *{nome}* - {preco}\n🔗 [Ver produto]({link})\n\n"
 
     return jsonify({"fulfillmentText": resposta})
 
